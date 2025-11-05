@@ -58,7 +58,16 @@ public interface UsbSerialPort extends Closeable {
     int STOPBITS_2 = 2;
 
     /** Values for get[Supported]ControlLines() */
-    enum ControlLine { RTS, CTS,  DTR, DSR,  CD, RI }
+    enum ControlLine { RTS, CTS, DTR, DSR, CD, RI }
+
+    /** Values for (set|get|getSupported)FlowControl() */
+    enum FlowControl { NONE, RTS_CTS, DTR_DSR, XON_XOFF, XON_XOFF_INLINE }
+
+    /** XON character used with flow control XON/XOFF */
+    char CHAR_XON = 17;
+    /** XOFF character used with flow control XON/XOFF */
+    char CHAR_XOFF = 19;
+
 
     /**
      * Returns the driver used by this port.
@@ -166,7 +175,7 @@ public interface UsbSerialPort extends Closeable {
      * @param parity one of {@link #PARITY_NONE}, {@link #PARITY_ODD},
      *               {@link #PARITY_EVEN}, {@link #PARITY_MARK}, or {@link #PARITY_SPACE}.
      * @throws IOException on error setting the port parameters
-     * @throws UnsupportedOperationException if values are not supported by a specific device
+     * @throws UnsupportedOperationException if not supported or values are not supported by a specific device
      */
     void setParameters(int baudRate, int dataBits, int stopBits, @Parity int parity) throws IOException;
 
@@ -248,6 +257,7 @@ public interface UsbSerialPort extends Closeable {
      *
      * @return EnumSet.contains(...) is {@code true} if set, else {@code false}
      * @throws IOException if an error occurred during reading
+     * @throws UnsupportedOperationException if not supported
      */
     EnumSet<ControlLine> getControlLines() throws IOException;
 
@@ -258,6 +268,36 @@ public interface UsbSerialPort extends Closeable {
      * @throws IOException if an error occurred during reading
      */
     EnumSet<ControlLine> getSupportedControlLines() throws IOException;
+
+    /**
+     * Set flow control mode, if supported
+     * @param flowControl @FlowControl
+     * @throws IOException if an error occurred during writing
+     * @throws UnsupportedOperationException if not supported
+     */
+    void setFlowControl(FlowControl flowControl) throws IOException;
+
+    /**
+     * Get flow control mode.
+     * @return FlowControl
+     */
+    FlowControl getFlowControl();
+
+    /**
+     * Get supported flow control modes
+     * @return EnumSet.contains(...) is {@code true} if supported, else {@code false}
+     */
+    EnumSet<FlowControl> getSupportedFlowControl();
+
+    /**
+     * If flow control = XON_XOFF, indicates that send is enabled by XON.
+     * Devices supporting flow control = XON_XOFF_INLINE return CHAR_XON/CHAR_XOFF in read() data.
+     *
+     * @return the current state
+     * @throws IOException if an error occurred during reading
+     * @throws UnsupportedOperationException if not supported
+     */
+    boolean getXON() throws IOException;
 
     /**
      * Purge non-transmitted output data and / or non-read input data.

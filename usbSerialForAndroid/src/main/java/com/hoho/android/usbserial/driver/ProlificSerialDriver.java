@@ -122,7 +122,7 @@ public class ProlificSerialDriver implements UsbSerialDriver {
         private volatile Thread mReadStatusThread = null;
         private final Object mReadStatusThreadLock = new Object();
         private boolean mStopReadStatusThread = false;
-        private IOException mReadStatusException = null;
+        private Exception mReadStatusException = null;
 
 
         public ProlificSerialPort(UsbDevice device, int portNumber) {
@@ -201,12 +201,12 @@ public class ProlificSerialDriver implements UsbSerialDriver {
 
         private void readStatusThreadFunction() {
             try {
+                byte[] buffer = new byte[STATUS_BUFFER_SIZE];
                 while (!mStopReadStatusThread) {
-                    byte[] buffer = new byte[STATUS_BUFFER_SIZE];
                     long endTime = MonotonicClock.millis() + 500;
                     int readBytesCount = mConnection.bulkTransfer(mInterruptEndpoint, buffer, STATUS_BUFFER_SIZE, 500);
-                    if(readBytesCount == -1 && MonotonicClock.millis() < endTime)
-                        testConnection();
+                    if(readBytesCount == -1)
+                        testConnection(MonotonicClock.millis() < endTime);
                     if (readBytesCount > 0) {
                         if (readBytesCount != STATUS_BUFFER_SIZE) {
                             throw new IOException("Invalid status notification, expected " + STATUS_BUFFER_SIZE + " bytes, got " + readBytesCount);
@@ -217,8 +217,9 @@ public class ProlificSerialDriver implements UsbSerialDriver {
                         }
                     }
                 }
-            } catch (IOException e) {
-                mReadStatusException = e;
+            } catch (Exception e) {
+                if (isOpen())
+                    mReadStatusException = e;
             }
             //Log.d(TAG, "end control line status thread " + mStopReadStatusThread + " " + (mReadStatusException == null ? "-" : mReadStatusException.getMessage()));
         }
@@ -249,8 +250,8 @@ public class ProlificSerialDriver implements UsbSerialDriver {
                 }
             }
 
-            /* throw and clear an exception which occured in the status read thread */
-            IOException readStatusException = mReadStatusException;
+            /* throw and clear an exception which occurred in the status read thread */
+            Exception readStatusException = mReadStatusException;
             if (mReadStatusException != null) {
                 mReadStatusException = null;
                 throw new IOException(readStatusException);
@@ -314,6 +315,7 @@ public class ProlificSerialDriver implements UsbSerialDriver {
             resetDevice();
             doBlackMagic();
             setControlLines(mControlLinesValue);
+            setFlowControl(mFlowControl);
         }
 
         @Override
@@ -525,7 +527,6 @@ public class ProlificSerialDriver implements UsbSerialDriver {
             setControlLines(newControlLinesValue);
         }
 
-
         @Override
         public EnumSet<ControlLine> getControlLines() throws IOException {
             int status = getStatus();
@@ -542,6 +543,39 @@ public class ProlificSerialDriver implements UsbSerialDriver {
         @Override
         public EnumSet<ControlLine> getSupportedControlLines() throws IOException {
             return EnumSet.allOf(ControlLine.class);
+        }
+
+        @Override
+        public void setFlowControl(FlowControl flowControl) throws IOException {
+            // vendorOut values from https://www.mail-archive.com/linux-usb@vger.kernel.org/msg110968.html
+            switch (flowControl) {
+                case NONE:
+                    if (mDeviceType == DeviceType.DEVICE_TYPE_HXN)
+                        vendorOut(0x0a, 0xff, null);
+                    else
+                        vendorOut(0, 0, null);
+                    break;
+                case RTS_CTS:
+                    if (mDeviceType == DeviceType.DEVICE_TYPE_HXN)
+                        vendorOut(0x0a, 0xfa, null);
+                    else
+                        vendorOut(0, 0x61, null);
+                    break;
+                case XON_XOFF_INLINE:
+                    if (mDeviceType == DeviceType.DEVICE_TYPE_HXN)
+                        vendorOut(0x0a, 0xee, null);
+                    else
+                        vendorOut(0, 0xc1, null);
+                    break;
+                default:
+                    throw new UnsupportedOperationException();
+            }
+            mFlowControl = flowControl;
+        }
+
+        @Override
+        public EnumSet<FlowControl> getSupportedFlowControl() {
+            return EnumSet.of(FlowControl.NONE, FlowControl.RTS_CTS, FlowControl.XON_XOFF_INLINE);
         }
 
         @Override

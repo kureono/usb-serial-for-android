@@ -18,6 +18,7 @@ import com.hoho.android.usbserial.driver.CommonUsbSerialPort;
 import com.hoho.android.usbserial.driver.Cp21xxSerialDriver;
 import com.hoho.android.usbserial.driver.FtdiSerialDriver;
 import com.hoho.android.usbserial.driver.ProlificSerialDriver;
+import com.hoho.android.usbserial.driver.ProlificSerialPortWrapper;
 import com.hoho.android.usbserial.driver.UsbId;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
@@ -31,6 +32,8 @@ import java.util.concurrent.Callable;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+
+import androidx.core.content.ContextCompat;
 
 public class UsbWrapper implements SerialInputOutputManager.Listener {
 
@@ -62,6 +65,7 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
     public boolean inputLinesOnlyRtsCts;
     public int writePacketSize = -1;
     public int writeBufferSize = -1;
+    public int readBufferSize = -1;
 
     public UsbWrapper(Context context, UsbSerialDriver serialDriver, int devicePort) {
         this.context = context;
@@ -90,7 +94,7 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
             intent.setPackage(context.getPackageName());
             PendingIntent permissionIntent = PendingIntent.getBroadcast(context, 0, intent, flags);
             IntentFilter filter = new IntentFilter("com.android.example.USB_PERMISSION");
-            context.registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            ContextCompat.registerReceiver(context, usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
             usbManager.requestPermission(serialDriver.getDevice(), permissionIntent);
             for(int i=0; i<5000; i++) {
                 if(granted[0] != null) break;
@@ -145,10 +149,18 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
                 case 2: writePacketSize = 512; writeBufferSize = 4096; break;
                 case 4: writePacketSize = 512; writeBufferSize = 2048; break;
             }
+            if(serialDriver.getDevice().getProductId() == UsbId.FTDI_FT231X)
+                writeBufferSize = 512;
         } else if (serialDriver instanceof CdcAcmSerialDriver) {
-            writePacketSize = 64; writeBufferSize = 128;
+            writePacketSize = 16; writeBufferSize = 32; // MCP2221 values, other devices might be different
         }
 
+        readBufferSize = writeBufferSize;
+        if (serialDriver instanceof Cp21xxSerialDriver && serialDriver.getPorts().size() == 2) {
+            readBufferSize = 256;
+        } else if (serialDriver instanceof FtdiSerialDriver && serialDriver.getPorts().size() == 1 && serialDriver.getDevice().getProductId() != UsbId.FTDI_FT231X) {
+            readBufferSize = 256;
+        } // PL2303 HXN checked in open()
     }
 
     public void tearDown() {
@@ -177,6 +189,8 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
                 if(!flags.contains(OpenCloseFlags.NO_CONTROL_LINE_INIT)) {
                     serialPort.setDTR(false);
                     serialPort.setRTS(false);
+                    if (serialPort.getFlowControl() != UsbSerialPort.FlowControl.NONE)
+                        serialPort.setFlowControl(UsbSerialPort.FlowControl.NONE);
                 }
             } catch (Exception ignored) {
             }
@@ -226,6 +240,10 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
             readBuffer.clear();
         }
         readError = null;
+
+        if (serialDriver instanceof ProlificSerialDriver && ProlificSerialPortWrapper.isDeviceTypeHxn(serialPort)) {
+            readBufferSize = 768;
+        }
     }
 
     public void waitForIoManagerStarted() throws IOException {
@@ -240,12 +258,15 @@ public class UsbWrapper implements SerialInputOutputManager.Listener {
         throw new IOException("IoManager not started");
     }
 
-    public boolean hasIoManagerThread() {
+    public boolean hasIoManagerThreads() {
+        int c = 0;
         for (Thread thread : Thread.getAllStackTraces().keySet()) {
-            if (thread.getName().equals(SerialInputOutputManager.class.getSimpleName()))
-                return true;
+            if (thread.getName().equals(SerialInputOutputManager.class.getSimpleName() + "_read"))
+                c += 1;
+            if (thread.getName().equals(SerialInputOutputManager.class.getSimpleName() + "_write"))
+                c += 1;
         }
-        return false;
+        return c == 2;
     }
 
     // wait full time
