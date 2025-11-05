@@ -14,7 +14,7 @@ on:
 jobs:
   create-release-on-version-tag-push:
     env:
-      BUILD_ARTIFACT_PATH: 'usbSerialForAndroid/build/intermediates/full_jar/release/CreateFullJarRelease/full.jar'
+      BUILD_ARTIFACT_PATH: 'usbSerialForAndroid/build/intermediates/full_jar/release/createFullJarRelease/full.jar'
       ASSET_NAME: 'usbserial.android.hoho.com-${{ github.ref_name }}.jar'
   
     runs-on: ubuntu-latest
